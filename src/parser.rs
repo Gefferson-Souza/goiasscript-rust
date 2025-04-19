@@ -37,12 +37,22 @@ impl Parser {
             } else {
                 Err(self.error("Esperava 'presta_serviço' após 'vai_na_frente'"))
             }
+        } else if self.match_tokens(&[TokenKind::ArrumaTrem]) {
+            // Suporte para classes
+            self.class_declaration()
         } else {
             self.statement()
         }
     }
 
     fn var_declaration(&mut self, is_mutable: bool) -> Result<Statement> {
+        // Verifica se a próxima sequência é a palavra-chave 'ocê' seguida por um ponto
+        if self.check(TokenKind::Oce) && self.check_next(TokenKind::Dot) {
+            // Esta é uma atribuição de propriedade, não uma declaração de variável comum
+            return self.property_assignment(is_mutable);
+        }
+
+        // Continua com a declaração de variável normal
         let name = self.consume(TokenKind::Identifier, "Esperava nome de variável")?;
         
         let initializer = if self.match_tokens(&[TokenKind::E]) {
@@ -58,6 +68,36 @@ impl Parser {
             name: name.lexeme,
             initializer,
         })
+    }
+
+    // Novo método para lidar com atribuição de propriedades
+    fn property_assignment(&mut self, _is_mutable: bool) -> Result<Statement> {
+        // Consumir a palavra-chave 'ocê'
+        self.advance(); // consome 'ocê'
+        self.advance(); // consome o ponto '.'
+        
+        let property = self.consume(TokenKind::Identifier, "Esperava nome de propriedade após 'ocê.'")?;
+        
+        self.consume(TokenKind::E, "Esperava 'é' após nome de propriedade")?;
+        
+        let value = self.expression()?;
+        
+        self.consume(TokenKind::Semicolon, "Esperava ';' após atribuição de propriedade")?;
+        
+        Ok(Statement::PropertyAssignment {
+            object: Expression::This,
+            property: property.lexeme,
+            value,
+        })
+    }
+
+    // Método auxiliar para verificar o próximo token após o atual
+    fn check_next(&self, kind: TokenKind) -> bool {
+        if self.current + 1 >= self.tokens.len() {
+            false
+        } else {
+            std::mem::discriminant(&self.tokens[self.current + 1].kind) == std::mem::discriminant(&kind)
+        }
     }
 
     fn function_declaration(&mut self, is_async: bool) -> Result<Statement> {
@@ -90,7 +130,70 @@ impl Parser {
         })
     }
 
-    // Implementando métodos ausentes
+    fn class_declaration(&mut self) -> Result<Statement> {
+        let name = self.consume(TokenKind::Identifier, "Esperava nome da classe após 'arruma_trem'")?;
+        
+        // Verifica se tem herança
+        let parent = if self.match_tokens(&[TokenKind::InherdaDe, TokenKind::ETipoDe]) {
+            Some(self.consume(TokenKind::Identifier, "Esperava nome da classe pai")?.lexeme)
+        } else {
+            None
+        };
+        
+        self.consume(TokenKind::OpenBrace, "Esperava '{' antes do corpo da classe")?;
+        
+        let mut methods = Vec::new();
+        
+        while !self.check(TokenKind::CloseBrace) && !self.is_at_end() {
+            let is_constructor = self.match_tokens(&[TokenKind::ApreparaTrem]);
+            let is_static = self.match_tokens(&[TokenKind::NumMuda]);
+            let is_async = self.match_tokens(&[TokenKind::VaiNaFrente]);
+            
+            // Assume nome do método ou construtor
+            let method_name = if is_constructor {
+                "constructor".to_string()
+            } else {
+                self.consume(TokenKind::Identifier, "Esperava nome do método")?.lexeme
+            };
+            
+            self.consume(TokenKind::OpenParen, "Esperava '(' após nome do método")?;
+            
+            // Parâmetros do método
+            let mut params = Vec::new();
+            if !self.check(TokenKind::CloseParen) {
+                loop {
+                    params.push(self.consume(TokenKind::Identifier, "Esperava nome de parâmetro")?.lexeme);
+                    
+                    if !self.match_tokens(&[TokenKind::Comma]) {
+                        break;
+                    }
+                }
+            }
+            
+            self.consume(TokenKind::CloseParen, "Esperava ')' após parâmetros")?;
+            self.consume(TokenKind::OpenBrace, "Esperava '{' antes do corpo do método")?;
+            
+            let body = self.block()?;
+            
+            methods.push(ClassMethod {
+                name: method_name,
+                params,
+                body,
+                is_static,
+                is_constructor,
+                is_async,
+            });
+        }
+        
+        self.consume(TokenKind::CloseBrace, "Esperava '}' após corpo da classe")?;
+        
+        Ok(Statement::ClassDeclaration {
+            name: name.lexeme,
+            methods,
+            parent,
+        })
+    }
+
     fn statement(&mut self) -> Result<Statement> {
         if self.match_tokens(&[TokenKind::SeOceQuiser]) {
             self.if_statement()
@@ -115,7 +218,6 @@ impl Parser {
         }
     }
     
-    // Implementação dos métodos que faltavam
     fn if_statement(&mut self) -> Result<Statement> {
         self.consume(TokenKind::OpenParen, "Esperava '(' após 'se_ocê_quiser'")?;
         let condition = self.expression()?;
@@ -154,7 +256,6 @@ impl Parser {
     fn for_statement(&mut self) -> Result<Statement> {
         self.consume(TokenKind::OpenParen, "Esperava '(' após 'vai_indo'")?;
         
-        // Inicializador
         let initializer = if self.match_tokens(&[TokenKind::Semicolon]) {
             None
         } else if self.match_tokens(&[TokenKind::Uai]) {
@@ -165,7 +266,6 @@ impl Parser {
             Some(Box::new(self.expression_statement()?))
         };
         
-        // Condição
         let condition = if !self.check(TokenKind::Semicolon) {
             Some(self.expression()?)
         } else {
@@ -173,7 +273,6 @@ impl Parser {
         };
         self.consume(TokenKind::Semicolon, "Esperava ';' após condição do loop")?;
         
-        // Incremento
         let increment = if !self.check(TokenKind::CloseParen) {
             Some(self.expression()?)
         } else {
@@ -181,7 +280,6 @@ impl Parser {
         };
         self.consume(TokenKind::CloseParen, "Esperava ')' após cláusulas do for")?;
         
-        // Corpo
         self.consume(TokenKind::OpenBrace, "Esperava '{' antes do corpo do loop")?;
         let body = self.block()?;
         
@@ -247,7 +345,6 @@ impl Parser {
         Ok(statements)
     }
     
-    // Implementação básica de expression para compilar
     fn expression(&mut self) -> Result<Expression> {
         self.logic_or()
     }
@@ -376,6 +473,23 @@ impl Parser {
         loop {
             if self.match_tokens(&[TokenKind::OpenParen]) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_tokens(&[TokenKind::Dot]) {
+                let name = self.consume(TokenKind::Identifier, "Esperava nome de propriedade após '.'")?;
+                expr = Expression::GetProperty {
+                    object: Box::new(expr),
+                    property: name.lexeme,
+                };
+            } else if self.match_tokens(&[TokenKind::OpenBracket]) {
+                let index = self.expression()?;
+                self.consume(TokenKind::CloseBracket, "Esperava ']' após índice")?;
+                
+                expr = Expression::Call {
+                    callee: Box::new(Expression::GetProperty {
+                        object: Box::new(expr),
+                        property: "get_index".to_string(),
+                    }),
+                    arguments: vec![index],
+                };
             } else {
                 break;
             }
@@ -383,16 +497,15 @@ impl Parser {
         
         Ok(expr)
     }
-    
-    // Comentado pois não está sendo utilizado
-    // fn addition(&mut self) -> Result<Expression> {
-    //     // ...código existente...
-    // }
 
     fn primary(&mut self) -> Result<Expression> {
+        // Adiciona reconhecimento para 'oce' (this) antes dos outros identificadores
+        if self.match_tokens(&[TokenKind::Oce]) {
+            return Ok(Expression::This);
+        }
+
         if self.match_tokens(&[TokenKind::StringLiteral]) {
             let value = self.previous().lexeme.clone();
-            // Remover as aspas
             let value = if value.len() >= 2 {
                 value[1..value.len()-1].to_string()
             } else {
@@ -432,9 +545,8 @@ impl Parser {
         if self.match_tokens(&[TokenKind::Identifier]) {
             let name = self.previous().lexeme.clone();
             
-            // Verifica se é uma atribuição (contador é valor)
             if self.check(TokenKind::E) {
-                self.advance(); // Consome o token 'é'
+                self.advance();
                 let value = self.expression()?;
                 return Ok(Expression::Assignment {
                     name,
@@ -456,8 +568,78 @@ impl Parser {
             self.consume(TokenKind::CloseParen, "Esperava ')' após expressão")?;
             return Ok(expr);
         }
+
+        if self.match_tokens(&[TokenKind::OpenBracket]) {
+            return self.array_literal();
+        }
+        
+        if self.match_tokens(&[TokenKind::OpenBrace]) {
+            return self.object_literal();
+        }
+
+        if self.match_tokens(&[TokenKind::FazUm]) {
+            let class_name = self.consume(TokenKind::Identifier, "Esperava nome de classe após 'faz_um'")?;
+            self.consume(TokenKind::OpenParen, "Esperava '(' após nome de classe")?;
+            
+            let mut arguments = Vec::new();
+            if !self.check(TokenKind::CloseParen) {
+                loop {
+                    arguments.push(self.expression()?);
+                    if !self.match_tokens(&[TokenKind::Comma]) {
+                        break;
+                    }
+                }
+            }
+            
+            self.consume(TokenKind::CloseParen, "Esperava ')' após argumentos")?;
+            
+            return Ok(Expression::New {
+                class: Box::new(Expression::Variable { name: class_name.lexeme }),
+                arguments,
+            });
+        }
         
         Err(self.error("Expressão esperada"))
+    }
+
+    fn array_literal(&mut self) -> Result<Expression> {
+        let mut elements = Vec::new();
+
+        if !self.check(TokenKind::CloseBracket) {
+            loop {
+                elements.push(self.expression()?);
+                if !self.match_tokens(&[TokenKind::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenKind::CloseBracket, "Esperava ']' após elementos do array")?;
+
+        Ok(Expression::Array { elements })
+    }
+
+    fn object_literal(&mut self) -> Result<Expression> {
+        let mut properties = Vec::new();
+
+        if self.match_tokens(&[TokenKind::CloseBrace]) {
+            return Ok(Expression::Object { properties });
+        }
+
+        loop {
+            let key = self.consume(TokenKind::Identifier, "Esperava nome de propriedade")?;
+            self.consume(TokenKind::Colon, "Esperava ':' após nome da propriedade")?;
+            let value = self.expression()?;
+            properties.push((key.lexeme, value));
+            
+            if !self.match_tokens(&[TokenKind::Comma]) {
+                break;
+            }
+        }
+
+        self.consume(TokenKind::CloseBrace, "Esperava '}' após propriedades do objeto")?;
+
+        Ok(Expression::Object { properties })
     }
 
     fn finish_call(&mut self, callee: Expression) -> Result<Expression> {
@@ -481,7 +663,6 @@ impl Parser {
         })
     }
 
-    // Método auxiliar para consumir o próximo token se for do tipo esperado
     fn consume(&mut self, kind: TokenKind, message: &str) -> Result<Token> {
         if self.check(kind.clone()) {
             Ok(self.advance())
@@ -490,7 +671,6 @@ impl Parser {
         }
     }
 
-    // Método que verifica se o token atual é de um tipo específico
     fn check(&self, kind: TokenKind) -> bool {
         if self.is_at_end() {
             false
@@ -499,7 +679,6 @@ impl Parser {
         }
     }
 
-    // Método que avança para o próximo token e retorna o atual
     fn advance(&mut self) -> Token {
         if !self.is_at_end() {
             self.current += 1;
@@ -507,22 +686,18 @@ impl Parser {
         self.previous().clone()
     }
 
-    // Método que verifica se chegamos ao final dos tokens
     fn is_at_end(&self) -> bool {
         self.current >= self.tokens.len()
     }
 
-    // Método que retorna o token atual sem avançar
     fn peek(&self) -> &Token {
         &self.tokens[self.current]
     }
 
-    // Método que retorna o token anterior
     fn previous(&self) -> &Token {
         &self.tokens[self.current - 1]
     }
 
-    // Método que tenta combinar o token atual com uma lista de tipos
     fn match_tokens(&mut self, kinds: &[TokenKind]) -> bool {
         for kind in kinds {
             if self.check(kind.clone()) {
@@ -533,27 +708,23 @@ impl Parser {
         false
     }
 
-    // Método que cria um erro de compilação
     fn error(&self, message: &str) -> anyhow::Error {
         let span = if !self.is_at_end() {
-            let current_span = self.peek().span.clone();
+            let current_token = self.peek();
+            let current_span = current_token.span.clone();
             
-            // Depuração adicional para posições específicas
-            if current_span.start >= 550 && current_span.end <= 560 {
-                eprintln!("DEBUG: Erro na posição crítica! Token atual: '{:?}' (tipo: {:?})", 
-                          self.peek().lexeme, self.peek().kind);
-                
-                // Mostrar tokens anteriores para contexto
-                if self.current > 0 {
-                    eprintln!("DEBUG: Token anterior: '{:?}' (tipo: {:?})", 
-                              self.previous().lexeme, self.previous().kind);
-                }
-                
-                // Mostrar próximo token se disponível
-                if self.current + 1 < self.tokens.len() {
-                    eprintln!("DEBUG: Próximo token: '{:?}' (tipo: {:?})", 
-                              self.tokens[self.current + 1].lexeme, self.tokens[self.current + 1].kind);
-                }
+            // Adiciona informações de depuração para qualquer erro
+            eprintln!("DEBUG: Erro no token: '{}' (tipo: {:?}, posição: {:?})", 
+                     current_token.lexeme, current_token.kind, current_span);
+            
+            if self.current > 0 {
+                eprintln!("DEBUG: Token anterior: '{}' (tipo: {:?})", 
+                         self.previous().lexeme, self.previous().kind);
+            }
+            
+            if self.current + 1 < self.tokens.len() {
+                eprintln!("DEBUG: Próximo token: '{}' (tipo: {:?})", 
+                         self.tokens[self.current + 1].lexeme, self.tokens[self.current + 1].kind);
             }
             
             current_span
@@ -567,7 +738,6 @@ impl Parser {
     }
 }
 
-// Função principal de parsing
 pub fn parse(tokens: Vec<Token>) -> Result<Program> {
     let mut parser = Parser::new(tokens);
     parser.parse()

@@ -65,6 +65,22 @@ pub enum TokenKind {
     #[token("faz_um")]
     FazUm,
     
+    // Palavras-chave de classes e OOP
+    #[token("arruma_trem")]
+    ArrumaTrem,
+    
+    #[token("aprepara_trem")]
+    ApreparaTrem,
+    
+    #[token("inherda_de")]
+    InherdaDe,
+    
+    #[token("num_muda")]
+    NumMuda,
+    
+    #[token("é_tipo_de")]
+    ETipoDe,
+    
     // Operadores
     #[token("e_mais")]
     EMais,

@@ -44,6 +44,27 @@ pub enum Statement {
     },
     BreakStatement,
     ContinueStatement,
+    ClassDeclaration {
+        name: String,
+        methods: Vec<ClassMethod>,
+        parent: Option<String>,
+    },
+    // Nova declaração para atribuição de propriedades
+    PropertyAssignment {
+        object: Expression,
+        property: String,
+        value: Expression,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassMethod {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Vec<Statement>,
+    pub is_static: bool,
+    pub is_constructor: bool,
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +109,11 @@ pub enum Expression {
     Assignment {
         name: String,
         value: Box<Expression>,
+    },
+    This,
+    New {
+        class: Box<Expression>,
+        arguments: Vec<Expression>,
     },
 }
 
